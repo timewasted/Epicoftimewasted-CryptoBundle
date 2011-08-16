@@ -2,62 +2,50 @@
 
 namespace Epicoftimewasted\CryptoBundle\Security;
 
-class CryptoManager
+class CryptoManager implements CryptoManagerInterface
 {
 	/**
-	 * @var string $hashAlgorithm The desired hash algorithm.
+	 * @var string $hashAlgorithm The current hashing algorithm
 	 */
 	private $hashAlgorithm;
 
 	/**
-	 * @var string $hashAlgorithmSize The output size (in bytes) of this hash algorithm.
+	 * @var string $prevHashAlgorithm The previously set hashing algorithm
 	 */
-	private $hashAlgorithmSize;
+	private $prevHashAlgorithm;
 
 	/**
-	 * @var string $publicKey The string representation of a public key.
+	 * @var string $publicKey The stored public encryption key
 	 */
 	private $publicKey;
 
 	/**
-	 * @var integer $publicKeySize The size (in bits) of this public key.
+	 * @var integer $publicKeySize The size in bits of the stored public key
 	 */
 	private $publicKeySize;
 
 	/**
-	 * @var integer $publicKeyEncryptMaxSize The maximum message size (in bytes) that can be encrypted using this public key and OAEP padding.
-	 */
-	private $publicKeyEncryptMaxSize;
-
-	/**
-	 * @var string $privateKey The string representation of a private key.
+	 * @var string $privateKey The stored private encryption key
 	 */
 	private $privateKey;
 
 	/**
-	 * @var integer $privateKeySize The size (in bits) of this private key.
+	 * @var integer $privateKeySize The size in bits of the stored private key
 	 */
 	private $privateKeySize;
 
 	/**
-	 * @var integer $privateKeyEncryptMaxSize The maximum message size (in bytes) that can be encrypted using this private key and OAEP padding.
-	 */
-	private $privateKeyEncryptMaxSize;
-
-	/**
-	 * Constructor
+	 * Constructor.
 	 *
-	 * @param string $hashAlgorithm The hash algorithm to use.
+	 * @param string $hashAlgorithm The default hashing algorithm
 	 */
 	public function __construct($hashAlgorithm = 'sha512')
 	{
-		$this->setHashAlgorithm($hashAlgorithm);
+		$this->hashAlgorithm = $hashAlgorithm;
 	}
 
 	/**
-	 * Returns the current hash algorithm.
-	 *
-	 * @return string The hash algorithm currently in use.
+	 * {@inheritDoc}
 	 */
 	public function getHashAlgorithm()
 	{
@@ -65,128 +53,167 @@ class CryptoManager
 	}
 
 	/**
-	 * Get the output size (in bytes) of the current hash algorithm.
-	 *
-	 * @return integer The size (in bytes) of the current hash algorithm.
+	 * {@inheritDoc}
 	 */
-	public function getHashAlgorithmSize()
+	public function changeHashAlgorithm($newAlgorithm)
 	{
-		return $this->hashAlgorithmSize;
+		/**
+		 * First, verify that the new algorithm is supported by mhash.
+		 */
+		if( !in_array($newAlgorithm, hash_algos()) )
+			throw new \InvalidArgumentException(sprintf('Invalid hash algorithm "%s" specified.  Must be one one "%s".', $newAlgorithm, implode(', ', hash_algos())));
+
+		/**
+		 * Save the current algorithm, then set the new algorithm
+		 */
+		$this->prevHashAlgorithm = $this->hashAlgorithm;
+		$this->hashAlgorithm = $newAlgorithm;
 	}
 
 	/**
-	 * Sets a new hash algorithm to be used.
-	 *
-	 * @param string $algorithm The hash algorithm to use.
-	 * @return void
+	 * {@inheritDoc}
 	 */
-	public function setHashAlgorithm($algorithm)
+	public function restoreHashAlgorithm()
 	{
-		if( !in_array($algorithm, hash_algos()) ) {
-			throw new \InvalidArgumentException(sprintf('Invalid hash algorithm "%s".  Must be one of "%s".', $algorithm, implode(', ', hash_algos())));
-		}
-		$this->hashAlgorithm = $algorithm;
-		$this->hashAlgorithmSize = strlen(hash($this->hashAlgorithm, null, true));
-
-		if( $this->publicKeySize !== null ) {
-			$this->publicKeyEncryptMaxSize = (int)ceil($this->publicKeySize / 8) - ($this->hashAlgorithmSize * 2) - 2;
-		}
-		if( $this->privateKeySize !== null ) {
-			$this->privateKeyEncryptMaxSize = (int)ceil($this->privateKeySize / 8) - ($this->hashAlgorithmSize * 2) - 2;
+		if( $this->prevHashAlgorithm !== null ) {
+			$curHashAlgorithm = $this->hashAlgorithm;
+			$this->hashAlgorithm = $this->prevHashAlgorithm;
+			$this->prevHashAlgorithm = $curHashAlgorithm;
 		}
 	}
 
 	/**
-	 * Returns the stored public key.
-	 *
-	 * @return mixed NULL on failure, string on success.
+	 * {@inheritDoc}
 	 */
-	public function getPublicKey()
+	public function getEntropy($amount)
 	{
-		if( $this->publicKey === null ) {
-			return null;
+		/**
+		 * Generating zero or less bytes of entropy doesn't make sense.
+		 */
+		if( !is_numeric($amount) || $amount <= 0 )
+			throw new \InvalidArgumentException(sprintf('Unable to generate %d bytes of entropy.  Amount must be a number greater than zero.', $amount));
+
+		/**
+		 * Try to use openssl_random_pseudo_bytes() first.
+		 */
+		if( function_exists('openssl_random_pseudo_bytes') ) {
+			$entropy = openssl_random_pseudo_bytes($amount, $isCryptoStrong);
+			if( $entropy !== false && $isCryptoStrong )
+				return $entropy;
 		}
-		return $this->publicKey;
+
+		/**
+		 * Since openssl_random_pseudo_bytes isn't available, try /dev/urandom.
+		 */
+		if( is_readable('/dev/urandom') ) {
+			if( ($urandom = fopen('/dev/urandom', 'r', false)) !== false ) {
+				$entropy = '';
+				do {
+					$entropy .= fread($urandom, $amount - strlen($entropy));
+				} while( strlen($entropy) < $amount );
+				fclose($urandom);
+
+				return substr($entropy, 0, $amount);
+			}
+		}
+
+		/**
+		 * All else has failed, so fall back to mt_rand().
+		 */
+		$entropy = '';
+		do {
+			$entropy .= pack('N', mt_rand(0, 0xffffffff));
+		} while( strlen($entropy) < $amount );
+		return substr($entropy, 0, $amount);
 	}
 
 	/**
-	 * Import a public key.
-	 *
-	 * @param mixed $pubKey This can be either a string representation, or a file:// URI to the key stored on disk.
-	 * @return mixed FALSE on failure, NULL on success.
+	 * {@inheritDoc}
 	 */
-	public function setPublicKey($pubKey)
+	final public function pbkdf2($password, $salt, $iterations, $keySize)
 	{
-		$key = openssl_pkey_get_public($pubKey);
-		if( $key === false ) {
-			return false;
+		$blockCount = ceil($keySize / strlen(hash($this->hashAlgorithm, null, true)));
+		$output = '';
+		for( $i = 1; $i <= $blockCount; $i++ ) {
+			$block = hash_hmac($this->hashAlgorithm, $salt . pack('N', $i), $password, true);
+			$ib = $block;
+			for( $loop = 1; $loop < $iterations; $loop++ ) {
+				$block = hash_hmac($this->hashAlgorithm, $block, $password, true);
+				$ib ^= $block;
+			}
+			$output .= $ib;
 		}
-		$keyDetails = openssl_pkey_get_details($key);
-		$this->publicKey = $keyDetails['key'];
-		$this->publicKeySize = $keyDetails['bits'];
-		$this->publicKeyEncryptMaxSize = (int)ceil($this->publicKeySize / 8) - ($this->hashAlgorithmSize * 2) - 2;
+		return substr($output, 0, $keySize);
 	}
 
 	/**
-	 * Returns the stored private key.
-	 *
-	 * @param string $passphrase The passphrase for the key, or null if none.
-	 * @return mixed NULL on failure, string on success.
+	 * {@inheritDoc}
 	 */
-	public function getPrivateKey($passphrase = null)
+	public function bcrypt($message, $salt = null, $workFactor = 11)
 	{
-		if( $this->privateKey === null ) {
-			return null;
-		}
-		if( empty($passphrase) ) {
-			openssl_pkey_export($this->privateKey, $output);
+		/**
+		 * Verify that bcrypt is available for usage.
+		 */
+		if( CRYPT_BLOWFISH !== 1 )
+			throw new \RuntimeException('bcrypt is not supported on this system.');
+
+		/**
+		 * Range check the work factor.
+		 */
+		if( $workFactor < 8 )
+			$workFactor = 8;
+		if( $workFactor > 31 )
+			$workFactor = 31;
+
+		/**
+		 * Note: valid characters for a salt are '0-9', 'A-Za-z', '$', '.', and '/'.
+		 */
+		if( $salt !== null ) {
+			/**
+			 * We only do basic checks on user-supplied salts, since crypt()
+			 * is much better equipped to do comprehensive checks.
+			 *
+			 * FIXME: I can't help but think the salt should be run through
+			 *   pbkdf2() or something to ensure it's a good salt.
+			 */
+			$salt = str_replace('+', '', base64_encode($salt));
+			if( strlen($salt) < 22 )
+				throw new \InvalidArgumentException('Salt must be a string of at least 22 characters in length.');
 		} else {
-			openssl_pkey_export($this->privateKey, $output, $passphrase);
+			/**
+			 * Since we're str_replacing() away bad characters, we should get
+			 * more entropy than we need to ensure that we have enough.
+			 */
+			$salt = $this->getEntropy(32);
+			$salt = substr(str_replace('+', '', base64_encode($salt)), 0, 22);
 		}
+		$salt = sprintf('$2a$%02d$%s', $workFactor, $salt);
+
+		/**
+		 * Hash the message and make sure that it's valid.
+		 */
+		$output = crypt($message, $salt);
+		if( strlen($output) < 13 )
+			throw new \RuntimeException('crypt() failed.');
+
 		return $output;
 	}
 
 	/**
-	 * Import a private key.
-	 *
-	 * @param mixed $privKey This can be either a string representation, or a file:// URI to the key stored on disk.
-	 * @param string $passphrase The passphrase for the key, or null if none.
-	 * @return mixed FALSE on failure, NULL on success.
+	 * {@inheritDoc}
 	 */
-	public function setPrivateKey($privKey, $passphrase = null)
+	public function generateKeyPair($keySize, $passphrase = null)
 	{
-		if( empty($passphrase) ) {
-			$key = openssl_pkey_get_private($privKey);
-		} else {
-			$key = openssl_pkey_get_private($privKey, $passphrase);
-		}
-		if( $key === false ) {
-			return false;
-		}
-		$this->privateKey = $key;
-		$keyDetails = openssl_pkey_get_details($this->privateKey);
-		$this->privateKeySize = $keyDetails['bits'];
-		$this->privateKeyEncryptMaxSize = (int)ceil($this->privateKeySize / 8) - ($this->hashAlgorithmSize * 2) - 2;
-	}
+		if( !is_numeric($keySize) || $keySize <= 0 )
+			throw new \InvalidArgumentException('Unable to generate a key of the specified size.  Must be greater than zero bits in size.');
 
-	/**
-	 * Generate a public and private key pair.
-	 *
-	 * @param integer $keySize The size (in bits) of the key to generate.
-	 * @param string $passphrase The passphrase to use for the private key, or null if none.
-	 * @return mixed FALSE on failure, TRUE on success.
-	 */
-	public function createKeyPair($keySize, $passphrase = null)
-	{
 		$config = array(
 			'digest_alg'		=> $this->hashAlgorithm,
 			'private_key_bits'	=> $keySize,
 			'private_key_type'	=> OPENSSL_KEYTYPE_RSA,
 		);
-		$keyResource = openssl_pkey_new($config);
-		if( $keyResource === false ) {
-			return false;
-		}
+		if( ($keyResource = openssl_pkey_new($config)) === false )
+			throw new \RuntimeException('Unable to generate new key pair.');
 
 		/**
 		 * Output of openssl_pkey_get_details()['rsa'] is defined here: http://www.openssl.org/docs/crypto/rsa.html
@@ -196,7 +223,6 @@ class CryptoManager
 		$keyDetails = openssl_pkey_get_details($keyResource);
 		$this->publicKey = $keyDetails['key'];
 		$this->publicKeySize = $keyDetails['bits'];
-		$this->publicKeyEncryptMaxSize = (int)ceil($this->publicKeySize / 8) - ($this->hashAlgorithmSize * 2) - 2;
 
 		if( empty($passphrase) ) {
 			openssl_pkey_export($keyResource, $this->privateKey);
@@ -207,307 +233,251 @@ class CryptoManager
 		}
 		$keyDetails = openssl_pkey_get_details($this->privateKey);
 		$this->privateKeySize = $keyDetails['bits'];
-		$this->privateKeyEncryptMaxSize = (int)ceil($this->privateKeySize / 8) - ($this->hashAlgorithmSize * 2) - 2;
-
-		return true;
 	}
 
 	/**
-	 * Encrypt data using a public key.  To decrypt, use privateDecrypt()
-	 *
-	 * @param string $plainText The text to be encrypted.
-	 * @return mixed FALSE on failure, TRUE on success.
+	 * {@inheritDoc}
 	 */
-	public function publicEncrypt($plainText)
+	public function importPublicKey($key)
 	{
-		if( $this->publicKey === null ) {
-			return false;
-		}
-		if( !is_string($plainText) || empty($plainText) ) {
-			return false;
-		}
-		if( strlen($plainText) > $this->publicKeyEncryptMaxSize ) {
-			return false;
-		}
+		if( ($keyResource = openssl_pkey_get_public($key)) === false )
+			throw new \RuntimeException('Unable to import the supplied public key.');
 
-		$cipherText = '';
-		if( openssl_public_encrypt($plainText, $cipherText, $this->publicKey, OPENSSL_PKCS1_OAEP_PADDING) === false ) {
-			return false;
-		}
-		return $cipherText;
+		$keyDetails = openssl_pkey_get_details($keyResource);
+		$this->publicKey = $keyDetails['key'];
+		$this->publicKeySize = $keyDetails['bits'];
 	}
 
 	/**
-	 * Encrypt data using a private key.  To decrypt, use publicDecrypt()
-	 *
-	 * @param string $plainText The text to be encrypted.
-	 * @return mixed FALSE on failure, TRUE on success.
+	 * {@inheritDoc}
 	 */
-	public function privateEncrypt($plainText)
+	public function exportPublicKey()
 	{
-		if( $this->privateKey === null ) {
-			return false;
-		}
-		if( !is_string($plainText) || empty($plainText) ) {
-			return false;
-		}
-		if( strlen($plainText) > $this->privateKeyEncryptMaxSize ) {
-			return false;
-		}
-
-		$cipherText = '';
-		if( openssl_private_encrypt($plainText, $cipherText, $this->privateKey, OPENSSL_PKCS1_OAEP_PADDING) === false ) {
-			return false;
-		}
-		return $cipherText;
+		return $this->publicKey === null ? null : $this->publicKey;
 	}
 
 	/**
-	 * Decrypt data that was encrypted using privateEncrypt()
-	 *
-	 * @param string $cipherText The text to be decrypted.
-	 * @return mixed FALSE on failure, TRUE on success.
+	 * {@inheritDoc}
 	 */
-	public function publicDecrypt($cipherText)
+	public function importPrivateKey($key, $passphrase = null)
 	{
-		if( $this->publicKey === null ) {
-			return false;
-		}
-		if( !is_string($cipherText) || empty($cipherText) ) {
-			return false;
-		}
+		if( empty($passphrase) )
+			$keyResource = openssl_pkey_get_private($key);
+		else
+			$keyResource = openssl_pkey_get_private($key, $passphrase);
+		if( $keyResource === false )
+			throw new \RuntimeException('Unable to import the supplied public key.');
 
-		$plainText = '';
-		if( openssl_public_decrypt($cipherText, $plainText, $this->publicKey, OPENSSL_PKCS1_OAEP_PADDING) === false ) {
-			return false;
-		}
-		return $plainText;
+		$keyDetails = openssl_pkey_get_details($keyResource);
+		$this->privateKey = $keyResource;
+		$this->privateKeySize = $keyDetails['bits'];
 	}
 
 	/**
-	 * Decrypt data that was encrypted using publicEncrypt()
-	 *
-	 * @param string $cipherText The text to be decrypted.
-	 * @return mixed FALSE on failure, TRUE on success.
+	 * {@inheritDoc}
 	 */
-	public function privateDecrypt($cipherText)
+	public function exportPrivateKey($passphrase = null)
 	{
-		if( $this->privateKey === null ) {
-			return false;
-		}
-		if( !is_string($cipherText) || empty($cipherText) ) {
-			return false;
-		}
+		if( $this->privateKey === null )
+			return null;
 
-		$plainText = '';
-		if( openssl_private_decrypt($cipherText, $plainText, $this->privateKey, OPENSSL_PKCS1_OAEP_PADDING) === false ) {
-			return false;
-		}
-		return $plainText;
+		if( empty($passphrase) )
+			openssl_pkey_export($this->privateKey, $export);
+		else
+			openssl_pkey_export($this->privateKey, $export, $passphrase);
+		return $export;
 	}
 
 	/**
-	 * Generates entropy.
+	 * {@inheritDoc}
 	 *
-	 * Rough performance characteristics for each method of randomness are as follows:
-	 *
-	 * mt_rand(): Best suited for short 1-8 byte strings.  Reasonable performance up to 32 byte strings,
-	 *   but still slower than openssl_random_pseudo_bytes.
-	 *
-	 * openssl_random_pseudo_bytes(): Best suited for 9-1536 byte strings.  Reasonable performance up to
-	 *   2560 byte strings, but still slower than using /dev/urandom.
-	 *
-	 * /dev/urandom: By far the slowest until strings get larger than 1536 bytes.  Once the strings are
-	 *   this large, though, nothing else can match it.
-	 *
-	 * @param integer $length The number of bytes of entropy to be generated.
-	 * @return string The entropy that was generated.
+	 * FIXME: Error handling could be better
 	 */
-	public function getEntropy($length)
+	public function encryptPublic($message)
 	{
-		if( $length <= 0 )
-			return '';
+		if( $this->publicKey === null )
+			return null;
 
-		$entropy = '';
-		if( $length > 1536 && file_exists('/dev/urandom') && is_readable('/dev/urandom') ) {
-			if( ($file = fopen('/dev/urandom', 'r')) !== false ) {
-				do {
-					$entropy .= fread($file, $length - strlen($entropy));
-				} while( strlen($entropy) < $length );
-				fclose($file);
-				return $entropy;
-			}
-		}
+		if( !is_string($message) || empty($message) )
+			throw new \InvalidArgumentException('Message must be a non-empty string.');
 
-		if( function_exists('openssl_random_pseudo_bytes') ) {
-			return openssl_random_pseudo_bytes($length);
-		}
+		$maxMessageLength = (int)ceil($this->publicKeySize / 8) - (hash($this->hashAlgorithm, null, true) * 2) - 2;
+		if( strlen($message) > $maxMessageLength )
+			return null;
 
-		do {
-			$entropy .= pack('N', mt_rand(0, 0xffffffff));
-		} while( strlen($entropy) < $length );
-		return substr($entropy, 0, $length);
+		if( openssl_public_encrypt($message, $encrypted, $this->publicKey, OPENSSL_PKCS1_OAEP_PADDING) === false )
+			return null;
+
+		return $encrypted;
 	}
 
 	/**
-	 * Password-based key derivation function 2, as defined in section 5.2:
-	 * http://www.ietf.org/rfc/rfc2898.txt
+	 * {@inheritDoc}
 	 *
-	 * @param string $data The message to be transformed.
-	 * @param string $salt The salt.
-	 * @param integer $iterations The number of times to iterate the hash function.
-	 * @param integer $keyLength The desired output size of the key.
-	 * @return string The derived key.
+	 * FIXME: Error handling could be better
 	 */
-	final public function pbkdf2($data, $salt, $iterations, $keyLength)
+	public function encryptPrivate($message)
 	{
-		$blockCount = ceil($keyLength / $this->hashAlgorithmSize);
-		$output = '';
-		for( $i = 1; $i <= $blockCount; $i++ ) {
-			$block = hash_hmac($this->hashAlgorithm, $salt . pack('N', $i), $data, true);
-			$ib = $block;
-			for( $loop = 1; $loop < $iterations; $loop++ ) {
-				$block = hash_hmac($this->hashAlgorithm, $block, $data, true);
-				$ib ^= $block;
-			}
-			$output .= $ib;
-		}
-		return substr($output, 0, $keyLength);
+		if( $this->privateKey === null )
+			return null;
+
+		if( !is_string($message) || empty($message) )
+			throw new \InvalidArgumentException('Message must be a non-empty string.');
+
+		$maxMessageLength = (int)ceil($this->privateKeySize / 8) - (hash($this->hashAlgorithm, null, true) * 2) - 2;
+		if( strlen($message) > $maxMessageLength )
+			return null;
+
+		if( openssl_private_encrypt($message, $encrypted, $this->privateKey, OPENSSL_PKCS1_OAEP_PADDING) === false )
+			return null;
+
+		return $encrypted;
 	}
 
 	/**
-	 * bcrypt a plain text password.
+	 * {@inheritDoc}
 	 *
-	 * Notes about work factor:
-	 *
-	 * While bcrypt will support work factors as low as 4, I'm opting to only
-	 * support down to 8.  However, I would not recommend using 8 for anything
-	 * except for throwaway data (bcrypt(getEntropy()) type situations).
-	 *
-	 * I would recommend using a work factor of at least 11 for moderately
-	 * important data.  Bumping it up to 12 might give a better balance of
-	 * strength and speed, depending on the hardware.
-	 *
-	 * For "high value" data, anything less than 14 is probably unacceptable.
-	 *
-	 * @param string $password The password to be hashed
-	 * @param string $salt The salt to user for the password
-	 * @param integer $workFactor The work factor
-	 * @return string The secure password
+	 * FIXME: Error handling could be better
 	 */
-	public function bcrypt($password, $salt = null, $workFactor = 11)
+	public function decryptPublic($message)
 	{
-		if( CRYPT_BLOWFISH !== 1 )
-			throw new \RuntimeException('bcrypt is not supported on this system.');
+		if( $this->publicKey === null )
+			return null;
 
-		if( $workFactor < 8 )
-			$workFactor = 8;
-		if( $workFactor > 31 )
-			$workFactor = 31;
+		if( !is_string($message) || empty($message) )
+			throw new \InvalidArgumentException('Message must be a non-empty string.');
 
-		// Valid characters in the salt are '0-9', 'A-Z', 'a-z', '$', '.', and '/'.
-		if( $salt !== null ) {
-			if( is_string($salt) )
-				$salt = str_replace('+', '', base64_encode($salt));
-			if( !is_string($salt) || strlen($salt) < 22 )
-				throw new \InvalidArgumentException('Salt must be a string of at least 22 characters in length.');
-		} else {
-			// We only need 22 bytes, but get more just to be sure.
-			$salt = $this->getEntropy(32);
-			$salt = substr(str_replace('+', '', base64_encode($salt)), 0, 22);
-		}
-		$salt = sprintf('$2a$%02d$%s', $workFactor, $salt);
+		if( openssl_public_decrypt($message, $decrypted, $this->publicKey, OPENSSL_PKCS1_OAEP_PADDING) === false )
+			return null;
 
-		$output = crypt($password, $salt);
-		if( strlen($output) < 13 ) {
-			// Failure
-		}
-		return $output;
+		return $decrypted;
 	}
 
 	/**
-	 * AES-256-CTR encryption.
+	 * {@inheritDoc}
 	 *
-	 * @param string $plainText The text to be encrypted.
-	 * @param string $password The password to use to derive the encryption key.
-	 * @return mixed FALSE on failure, string on success.
+	 * FIXME: Error handling could be better
 	 */
-	public function encrypt($plainText, $password)
+	public function decryptPrivate($message)
 	{
-		$module = mcrypt_module_open(MCRYPT_RIJNDAEL_256, '', 'ctr', '');
-		if( $module === false ) {
-			return false;
-		}
+		if( $this->privateKey === null )
+			return null;
 
+		if( !is_string($message) || empty($message) )
+			throw new \InvalidArgumentException('Message must be a non-empty string.');
+
+		if( openssl_private_decrypt($message, $decrypted, $this->privateKey, OPENSSL_PKCS1_OAEP_PADDING) === false )
+			return null;
+
+		return $decrypted;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	public function encrypt($message, $passphrase)
+	{
+		/**
+		 * Open the desired module.
+		 */
+		if( ($module = mcrypt_module_open(MCRYPT_RIJNDAEL_256, '', 'ctr', '')) === false )
+			throw new \RuntimeException('Unable to open the Rijndael 256 CTR mcrypt module.');
+
+		/**
+		 * Generate the salt, key, and IV.
+		 */
 		$salt = $this->getEntropy(32);
-		$keyIV = $this->pbkdf2($password, $salt, 10000, mcrypt_enc_get_key_size($module) + mcrypt_enc_get_iv_size($module));
+		$keyIV = $this->pbkdf2($passphrase, $salt, 10000, mcrypt_enc_get_key_size($module) + mcrypt_enc_get_iv_size($module));
 		$key = substr($keyIV, 0, mcrypt_enc_get_key_size($module));
 		$IV = substr($keyIV, mcrypt_enc_get_key_size($module), mcrypt_enc_get_iv_size($module));
 
-		$retVal = mcrypt_generic_init($module, $key, $IV);
-		if( $retVal === false || $retVal < 0 ) {
+		/**
+		 * Initialize the module with the generated key and IV.
+		 */
+		$initValue = mcrypt_generic_init($module, $key, $IV);
+		if( $initValue === false || $initValue < 0 ) {
 			mcrypt_module_close($module);
-			return false;
+			throw new \RuntimeException('Unable to initialize the mcrypt module.');
 		}
-//		$cipherText = mcrypt_generic($module, $this->oaep_pad($plainText, $salt));
-		$cipherText = mcrypt_generic($module, $plainText);
-		$cipherText = 'Salted__' . $salt . $cipherText . hash_hmac($this->hashAlgorithm, $cipherText, $key, true);
 
+		/**
+		 * Encrypt the message and add the salt and HMAC.
+		 */
+//		$encrypted = mcrypt_generic($module, $this->oaep_pad($message, $salt));
+		$encrypted = mcrypt_generic($module, $message);
+		$encrypted = 'Salted__' . $salt . $encrypted . hash_hmac($this->hashAlgorithm, $encrypted, $key, true);
+
+		/**
+		 * Clean up mcrypt then return.
+		 */
 		mcrypt_generic_deinit($module);
 		mcrypt_module_close($module);
-		return $cipherText;
+		return $encrypted;
 	}
 
 	/**
-	 * AES-256-CTR decryption.
-	 *
-	 * @param string $cipherText The text to be decrypted.
-	 * @param string $password The password to use to derive the decryption key.
-	 * @return mixed FALSE on failure, string on success.
+	 * {@inheritDoc}
 	 */
-	public function decrypt($cipherText, $password)
+	public function decrypt($message, $passphrase)
 	{
-		// 8 for 'Salted__', 32 for the size of the salt we're using.
-		if( strlen($cipherText) <= 8 + 32 + $this->hashAlgorithmSize || substr($cipherText, 0, 8) !== 'Salted__' ) {
-			return false;
-		}
+		/**
+		 * Check that the message appears to have a valid format.  The length
+		 * must be 8 ("Salted__") + 32 (length of the salt) + size of the
+		 * output from our hashing algorithm.  The message must also start with
+		 * the string "Salted__".
+		 */
+		$hashAlgorithmSize = strlen(hash($this->hashAlgorithm, null, true));
+		if( strlen($message) <= 8 + 32 + $hashAlgorithmSize || substr($message, 0, 8) !== 'Salted__' )
+			throw new \RuntimeException('Unable to decrypt message: invalid format.');
 
-		$module = mcrypt_module_open(MCRYPT_RIJNDAEL_256, '', 'ctr', '');
-		if( $module === false ) {
-			return false;
-		}
+		/**
+		 * Open the desired module.
+		 */
+		if( ($module = mcrypt_module_open(MCRYPT_RIJNDAEL_256, '', 'ctr', '')) === false )
+			throw new \RuntimeException('Unable to open the Rijndael 256 CTR mcrypt module.');
 
-		$salt = substr($cipherText, 8, 32);
-		$hmac = substr($cipherText, -$this->hashAlgorithmSize);
-		$cipherText = substr($cipherText, 8 + 32, strlen($cipherText) - (8 + 32)  - $this->hashAlgorithmSize);
+		/**
+		 * Extract the salt and HMAC from the message.
+		 */
+		$salt = substr($message, 8, 32);
+		$hmac = substr($message, -$hashAlgorithmSize);
+		$message = substr($message, 8 + 32, strlen($message) - (8 + 32) - $hashAlgorithmSize);
 
-		$keyIV = $this->pbkdf2($password, $salt, 10000, mcrypt_enc_get_key_size($module) + mcrypt_enc_get_iv_size($module));
+		/**
+		 * Generate the key and IV, and verify that the HMAC is valid.
+		 */
+		$keyIV = $this->pbkdf2($passphrase, $salt, 10000, mcrypt_enc_get_key_size($module) + mcrypt_enc_get_iv_size($module));
 		$key = substr($keyIV, 0, mcrypt_enc_get_key_size($module));
 		$IV = substr($keyIV, mcrypt_enc_get_key_size($module), mcrypt_enc_get_iv_size($module));
-		if( hash_hmac($this->hashAlgorithm, $cipherText, $key, true) !== $hmac ) {
-			return false;
+		if( hash_hmac($this->hashAlgorithm, $message, $key, true) !== $hmac )
+			throw new \RuntimeException('Possible corruption/tampering: HMAC does not match the message.');
+
+		/**
+		 * Initialize the module with the generated key and IV.
+		 */
+		$initValue = mcrypt_generic_init($module, $key, $IV);
+		if( $initValue === false || $initValue < 0 ) {
+			mcrypt_module_close($module);
+			throw new \RuntimeException('Unable to initialize the mcrypt module.');
 		}
 
-		$retVal = mcrypt_generic_init($module, $key, $IV);
-		if( $retVal === false || $retVal < 0 ) {
-			mcrypt_module_close($module);
-			return false;
-		}
-		$plainText = mdecrypt_generic($module, $cipherText);
+		/**
+		 * Decrypt the message and clean up mcrypt.
+		 */
+		$decrypted = mdecrypt_generic($module, $message);
 		mcrypt_generic_deinit($module);
 		mcrypt_module_close($module);
 /*
-		$plainText = $this->oaep_unpad($plainText, $salt);
-		if( $plainText === false ) {
-			return false;
-		}
+		if( ($decrypted = $this->oaep_unpad($decrypted, $salt)) === false )
+			throw new \RuntimeException('Unable to unpad decrypted message.');
 */
-		return $plainText;
+
+		return $decrypted;
 	}
 
 	/**
-	 * Mask Generation Function, as defined in section B.2.1:
-	 * http://www.ietf.org/rfc/rfc3447.txt
+	 * Mask Generation Function.
+	 * See section B.2.1 of http://www.ietf.org/rfc/rfc3447.txt
 	 */
 	final protected function mgf($seed, $maskLength)
 	{
@@ -523,8 +493,8 @@ class CryptoManager
 	}
 
 	/**
-	 * EME-OAEP encoding, as defined in section 7.1.1, step 2:
-	 * http://www.ietf.org/rfc/rfc3447.txt
+	 * EME-OAEP encoding.
+	 * See section 7.1.1, step 2 of http://www.ietf.org/rfc/rfc3447.txt
 	 */
 	final protected function oaep_pad($data, $label = '')
 	{
@@ -541,8 +511,8 @@ class CryptoManager
 	}
 
 	/**
-	 * EME-OAEP decoding, as defined in section 7.1.2, step 3:
-	 * http://www.ietf.org/rfc/rfc3447.txt
+	 * EME-OAEP decoding.
+	 * See section 7.1.2, step 3 of http://www.ietf.org/rfc/rfc3447.txt
 	 */
 	final protected function oaep_unpad($data, $label = '')
 	{

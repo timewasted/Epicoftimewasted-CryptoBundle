@@ -11,9 +11,6 @@
     <services>
         <service id="epicoftimewasted_crypto.crypto_manager" class="%epicoftimewasted_crypto.crypto_manager.class%">
             <argument>%epicoftimewasted_crypto.algorithm%</argument>
-            <argument type="service" id="service_container" />
         </service>
-
-        <service id="crypto.crypto_manager" alias="epicoftimewasted_crypto.crypto_manager" public="false" />
     </services>
 </container>
