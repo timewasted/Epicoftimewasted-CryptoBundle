@@ -15,6 +15,11 @@ class CryptoManager implements CryptoManagerInterface
 	private $prevHashAlgorithm;
 
 	/**
+	 * @var integer $hashAlgorithmSize The output size in bytes of the current hashing algorithm
+	 */
+	private $hashAlgorithmSize;
+
+	/**
 	 * @var string $publicKey The stored public encryption key
 	 */
 	private $publicKey;
@@ -41,7 +46,11 @@ class CryptoManager implements CryptoManagerInterface
 	 */
 	public function __construct($hashAlgorithm = 'sha512')
 	{
+		if( !in_array($hashAlgorithm, hash_algos()) )
+			throw new \InvalidArgumentException(sprintf('Invalid hash algorithm "%s" specified.  Must be one one "%s".', $hashAlgorithm, implode(', ', hash_algos())));
+
 		$this->hashAlgorithm = $hashAlgorithm;
+		$this->hashAlgorithmSize = strlen(hash($this->hashAlgorithm, null, true));
 	}
 
 	/**
@@ -50,6 +59,14 @@ class CryptoManager implements CryptoManagerInterface
 	public function getHashAlgorithm()
 	{
 		return $this->hashAlgorithm;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	public function getHashAlgorithmSize()
+	{
+		return $this->hashAlgorithmSize;
 	}
 
 	/**
@@ -68,6 +85,7 @@ class CryptoManager implements CryptoManagerInterface
 		 */
 		$this->prevHashAlgorithm = $this->hashAlgorithm;
 		$this->hashAlgorithm = $newAlgorithm;
+		$this->hashAlgorithmSize = strlen(hash($this->hashAlgorithm, null, true));
 	}
 
 	/**
@@ -78,6 +96,7 @@ class CryptoManager implements CryptoManagerInterface
 		if( $this->prevHashAlgorithm !== null ) {
 			$curHashAlgorithm = $this->hashAlgorithm;
 			$this->hashAlgorithm = $this->prevHashAlgorithm;
+			$this->hashAlgorithmSize = strlen(hash($this->hashAlgorithm, null, true));
 			$this->prevHashAlgorithm = $curHashAlgorithm;
 		}
 	}
@@ -132,7 +151,7 @@ class CryptoManager implements CryptoManagerInterface
 	 */
 	final public function pbkdf2($password, $salt, $iterations, $keySize)
 	{
-		$blockCount = ceil($keySize / strlen(hash($this->hashAlgorithm, null, true)));
+		$blockCount = ceil($keySize / $this->hashAlgorithmSize);
 		$output = '';
 		for( $i = 1; $i <= $blockCount; $i++ ) {
 			$block = hash_hmac($this->hashAlgorithm, $salt . pack('N', $i), $password, true);
@@ -202,7 +221,7 @@ class CryptoManager implements CryptoManagerInterface
 	/**
 	 * {@inheritDoc}
 	 */
-	public function generateKeyPair($keySize, $passphrase = null)
+	public function generateKeyPair($keySize = 2048, $passphrase = null)
 	{
 		if( !is_numeric($keySize) || $keySize <= 0 )
 			throw new \InvalidArgumentException('Unable to generate a key of the specified size.  Must be greater than zero bits in size.');
@@ -290,84 +309,76 @@ class CryptoManager implements CryptoManagerInterface
 
 	/**
 	 * {@inheritDoc}
-	 *
-	 * FIXME: Error handling could be better
 	 */
 	public function encryptPublic($message)
 	{
 		if( $this->publicKey === null )
-			return null;
+			throw new \RuntimeException('Unable to encrypt message with public key: no public key found.');
 
 		if( !is_string($message) || empty($message) )
-			throw new \InvalidArgumentException('Message must be a non-empty string.');
+			throw new \InvalidArgumentException('Unable to encrypt message with public key: message must be a non-empty string.');
 
-		$maxMessageLength = (int)ceil($this->publicKeySize / 8) - (hash($this->hashAlgorithm, null, true) * 2) - 2;
+		$maxMessageLength = (int)ceil($this->publicKeySize / 8) - ($this->hashAlgorithmSize * 2) - 2;
 		if( strlen($message) > $maxMessageLength )
-			return null;
+			throw new \RuntimeException(sprintf('Unable to encrypt message with public key: message has a length of %d but the maximum message length is %d.', strlen($message), $maxMessageLength));
 
 		if( openssl_public_encrypt($message, $encrypted, $this->publicKey, OPENSSL_PKCS1_OAEP_PADDING) === false )
-			return null;
+			throw new \RuntimeException('Unable to encrypt message with public key: encryption failed.');
 
 		return $encrypted;
 	}
 
 	/**
 	 * {@inheritDoc}
-	 *
-	 * FIXME: Error handling could be better
 	 */
 	public function encryptPrivate($message)
 	{
 		if( $this->privateKey === null )
-			return null;
+			throw new \RuntimeException('Unable to encrypt message with private key: no private key found.');
 
 		if( !is_string($message) || empty($message) )
-			throw new \InvalidArgumentException('Message must be a non-empty string.');
+			throw new \InvalidArgumentException('Unable to encrypt message with private key: message must be a non-empty string.');
 
-		$maxMessageLength = (int)ceil($this->privateKeySize / 8) - (hash($this->hashAlgorithm, null, true) * 2) - 2;
+		$maxMessageLength = (int)ceil($this->privateKeySize / 8) - ($this->hashAlgorithmSize * 2) - 2;
 		if( strlen($message) > $maxMessageLength )
-			return null;
+			throw new \RuntimeException(sprintf('Unable to encrypt message with private key: message has a length of %d but the maximum message length is %d.', strlen($message), $maxMessageLength));
 
-		if( openssl_private_encrypt($message, $encrypted, $this->privateKey, OPENSSL_PKCS1_OAEP_PADDING) === false )
-			return null;
+		if( openssl_private_encrypt($this->oaep_pad($message), $encrypted, $this->privateKey, OPENSSL_NO_PADDING) === false )
+			throw new \RuntimeException('Unable to encrypt message with private key: encryption failed.');
 
 		return $encrypted;
 	}
 
 	/**
 	 * {@inheritDoc}
-	 *
-	 * FIXME: Error handling could be better
 	 */
 	public function decryptPublic($message)
 	{
 		if( $this->publicKey === null )
-			return null;
+			throw new \RuntimeException('Unable to decrypt message with public key: no public key found.');
 
 		if( !is_string($message) || empty($message) )
-			throw new \InvalidArgumentException('Message must be a non-empty string.');
+			throw new \InvalidArgumentException('Unable to decrypt message with public key: message must be a non-empty string.');
 
-		if( openssl_public_decrypt($message, $decrypted, $this->publicKey, OPENSSL_PKCS1_OAEP_PADDING) === false )
-			return null;
+		if( openssl_public_decrypt($message, $decrypted, $this->publicKey, OPENSSL_NO_PADDING) === false )
+			throw new \RuntimeException('Unable to decrypt message with public key: decryption failed.');
 
-		return $decrypted;
+		return $this->oaep_unpad($decrypted);
 	}
 
 	/**
 	 * {@inheritDoc}
-	 *
-	 * FIXME: Error handling could be better
 	 */
 	public function decryptPrivate($message)
 	{
 		if( $this->privateKey === null )
-			return null;
+			throw new \RuntimeException('Unable to decrypt message with private key: no private key found.');
 
 		if( !is_string($message) || empty($message) )
-			throw new \InvalidArgumentException('Message must be a non-empty string.');
+			throw new \InvalidArgumentException('Unable to decrypt message with private key: message must be a non-empty string.');
 
 		if( openssl_private_decrypt($message, $decrypted, $this->privateKey, OPENSSL_PKCS1_OAEP_PADDING) === false )
-			return null;
+			throw new \RuntimeException('Unable to decrypt message with private key: decryption failed.');
 
 		return $decrypted;
 	}
@@ -426,8 +437,7 @@ class CryptoManager implements CryptoManagerInterface
 		 * output from our hashing algorithm.  The message must also start with
 		 * the string "Salted__".
 		 */
-		$hashAlgorithmSize = strlen(hash($this->hashAlgorithm, null, true));
-		if( strlen($message) <= 8 + 32 + $hashAlgorithmSize || substr($message, 0, 8) !== 'Salted__' )
+		if( strlen($message) <= 8 + 32 + $this->hashAlgorithmSize || substr($message, 0, 8) !== 'Salted__' )
 			throw new \RuntimeException('Unable to decrypt message: invalid format.');
 
 		/**
@@ -440,8 +450,8 @@ class CryptoManager implements CryptoManagerInterface
 		 * Extract the salt and HMAC from the message.
 		 */
 		$salt = substr($message, 8, 32);
-		$hmac = substr($message, -$hashAlgorithmSize);
-		$message = substr($message, 8 + 32, strlen($message) - (8 + 32) - $hashAlgorithmSize);
+		$hmac = substr($message, -$this->hashAlgorithmSize);
+		$message = substr($message, 8 + 32, strlen($message) - (8 + 32) - $this->hashAlgorithmSize);
 
 		/**
 		 * Generate the key and IV, and verify that the HMAC is valid.

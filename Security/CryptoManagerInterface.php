@@ -16,6 +16,13 @@ interface CryptoManagerInterface
 	public function getHashAlgorithm();
 
 	/**
+	 * Gets the output size of the current hashing algorithm in bytes.
+	 *
+	 * @return integer The output size of the current hashing algorithm in bytes
+	 */
+	public function getHashAlgorithmSize();
+
+	/**
 	 * Change the current hashing algorithm.
 	 *
 	 * @param string $newAlgorithm The hashing algorithm that we want to use
@@ -30,7 +37,7 @@ interface CryptoManagerInterface
 	/**
 	 * Generates random bytes of data (entropy).
 	 *
-	 * @param int $amount The amount of entropy, in bytes, to generate
+	 * @param integer $amount The amount of entropy, in bytes, to generate
 	 * @return string The generated entropy
 	 */
 	public function getEntropy($amount);
@@ -41,8 +48,8 @@ interface CryptoManagerInterface
 	 *
 	 * @param string $password The password to be transformed into a key
 	 * @param string $salt The salt to use
-	 * @param int $iterations The number of times to iterate the hash function
-	 * @param int $keySize The desired size of the key in bytes
+	 * @param integer $iterations The number of times to iterate the hash function
+	 * @param integer $keySize The desired size of the key in bytes
 	 * @return string The derived key
 	 */
 	public function pbkdf2($password, $salt, $iterations, $keySize);
@@ -56,7 +63,7 @@ interface CryptoManagerInterface
 	 *
 	 * @param string $message The message (password) to be hashed
 	 * @param string $salt The salt to use
-	 * @param int $workFactor The work factor (strength) of the hash
+	 * @param integer $workFactor The work factor (strength) of the hash
 	 * @return string The hashed message
 	 */
 	public function bcrypt($message, $salt = null, $workFactor = 11);
@@ -67,7 +74,7 @@ interface CryptoManagerInterface
 	 * @param integer $keySize The desired size in bits of the keys to generate
 	 * @param string $passphrase The passphrase to use for the private key, or null if no passphrase
 	 */
-	public function generateKeyPair($keySize, $passphrase = null);
+	public function generateKeyPair($keySize = 2048, $passphrase = null);
 
 	/**
 	 * Import a public encryption key for usage.
@@ -103,8 +110,16 @@ interface CryptoManagerInterface
 	 * Encrypt a message using the stored public key.
 	 * To decrypt, use decryptPrivate().
 	 *
+	 * NOTE: This function uses OAEP padding, which means that it uses the
+	 * current hashing algorithm to pad the message.  This means that your
+	 * choice of hashing algorithm and key size could severely limit the
+	 * maximum length of the message that can be encrypted.  For example, using
+	 * a key size of 1024 bits and a hashing algorithm of SHA-1 limits the
+	 * maximum message length to 86 bytes.  However, if you were to use SHA-512,
+	 * you would not be able to encrypt a message at all using a 1024 bit key.
+	 *
 	 * @param string $message The message to be encrypted
-	 * @return mixed The encrypted message on success, otherwise null on failure
+	 * @return string The encrypted message on success
 	 */
 	public function encryptPublic($message);
 
@@ -112,8 +127,16 @@ interface CryptoManagerInterface
 	 * Encrypt a message using the stored private key.
 	 * To decrypt, use decryptPublic().
 	 *
+	 * NOTE: This function uses OAEP padding, which means that it uses the
+	 * current hashing algorithm to pad the message.  This means that your
+	 * choice of hashing algorithm and key size could severely limit the
+	 * maximum length of the message that can be encrypted.  For example, using
+	 * a key size of 1024 bits and a hashing algorithm of SHA-1 limits the
+	 * maximum message length to 86 bytes.  However, if you were to use SHA-512,
+	 * you would not be able to encrypt a message at all using a 1024 bit key.
+	 *
 	 * @param string $message The message to be encrypted
-	 * @return mixed The encrypted message on success, otherwise null on failure
+	 * @return string The encrypted message on success
 	 */
 	public function encryptPrivate($message);
 
@@ -122,7 +145,7 @@ interface CryptoManagerInterface
 	 * Used to decrypt for encryptPrivate().
 	 *
 	 * @param string $message The message to be decrypted
-	 * @return mixed The decrypted message on success, otherwise null on failure
+	 * @return string The decrypted message on success
 	 */
 	public function decryptPublic($message);
 
@@ -131,7 +154,7 @@ interface CryptoManagerInterface
 	 * Used to decrypt for encryptPublic().
 	 *
 	 * @param string $message The message to be decrypted
-	 * @return mixed The decrypted message on success, otherwise null on failure
+	 * @return string The decrypted message on success
 	 */
 	public function decryptPrivate($message);
 
