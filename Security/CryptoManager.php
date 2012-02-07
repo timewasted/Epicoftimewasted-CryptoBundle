@@ -75,7 +75,7 @@ class CryptoManager implements CryptoManagerInterface
 	public function changeHashAlgorithm($newAlgorithm)
 	{
 		/**
-		 * First, verify that the new algorithm is supported by mhash.
+		 * First, verify that the new algorithm is supported by hash().
 		 */
 		if( !in_array($newAlgorithm, hash_algos()) )
 			throw new \InvalidArgumentException(sprintf('Invalid hash algorithm "%s" specified.  Must be one one "%s".', $newAlgorithm, implode(', ', hash_algos())));
@@ -386,7 +386,7 @@ class CryptoManager implements CryptoManagerInterface
 	/**
 	 * {@inheritDoc}
 	 */
-	public function encrypt($message, $passphrase)
+	public function encrypt($message, $passphrase, $oaepPadding = false)
 	{
 		/**
 		 * Open the desired module.
@@ -414,8 +414,7 @@ class CryptoManager implements CryptoManagerInterface
 		/**
 		 * Encrypt the message and add the salt and HMAC.
 		 */
-//		$encrypted = mcrypt_generic($module, $this->oaep_pad($message, $salt));
-		$encrypted = mcrypt_generic($module, $message);
+		$encrypted = mcrypt_generic($module, $oaepPadding === true ? $this->oaep_pad($message, $salt) : $message);
 		$encrypted = 'Salted__' . $salt . $encrypted . hash_hmac($this->hashAlgorithm, $encrypted, $key, true);
 
 		/**
@@ -429,7 +428,7 @@ class CryptoManager implements CryptoManagerInterface
 	/**
 	 * {@inheritDoc}
 	 */
-	public function decrypt($message, $passphrase)
+	public function decrypt($message, $passphrase, $oaepPadding = false)
 	{
 		/**
 		 * Check that the message appears to have a valid format.  The length
@@ -477,10 +476,10 @@ class CryptoManager implements CryptoManagerInterface
 		$decrypted = mdecrypt_generic($module, $message);
 		mcrypt_generic_deinit($module);
 		mcrypt_module_close($module);
-/*
-		if( ($decrypted = $this->oaep_unpad($decrypted, $salt)) === false )
-			throw new \RuntimeException('Unable to unpad decrypted message.');
-*/
+		if( $oaepPadding === true ) {
+			if( ($decrypted = $this->oaep_unpad($decrypted, $salt)) === false )
+				throw new \RuntimeException('Unable to unpad decrypted message.');
+		}
 
 		return $decrypted;
 	}

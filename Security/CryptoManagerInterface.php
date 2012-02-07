@@ -165,7 +165,7 @@ interface CryptoManagerInterface
 	 * @param string $passphrase The passphrase to use to derive the encryption key
 	 * @return string The encrypted message
 	 */
-	public function encrypt($message, $passphrase);
+	public function encrypt($message, $passphrase, $oaepPadding = false);
 
 	/**
 	 * AES-256-CTR (symmetric) decryption.
@@ -174,5 +174,5 @@ interface CryptoManagerInterface
 	 * @param string $passphrase The passphrase to use to derive the decryption key
 	 * @return string The decrypted message
 	 */
-	public function decrypt($message, $passphrase);
+	public function decrypt($message, $passphrase, $oaepPadding = false);
 }
