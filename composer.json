@@ -1,0 +1,22 @@
+{
+  "name": "epicoftimewasted/crypto-bundle",
+  "type": "symfony-bundle",
+  "description": "Crypto bundle for Symfony 2",
+  "homepage": "https://github.com/timewasted/Epicoftimewasted-CryptoBundle",
+  "license": "BSD-2-Clause",
+  "authors": [
+    {
+      "name": "Ryan Rogers",
+      "email": "ryan@timewasted.me"
+    }
+  ],
+  "require": {
+    "php": ">=5.3.3"
+  },
+  "autoload": {
+    "psr-0": {
+      "Epicoftimewasted\\CryptoBundle": ""
+    }
+  },
+  "target-dir": "Epicoftimewasted/CryptoBundle"
+}

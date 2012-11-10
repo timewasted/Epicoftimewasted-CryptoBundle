@@ -1,53 +1,24 @@
 About EpicoftimewastedCryptoBundle
-===================
+==================================
 
 Installation:
 -------------
 
 1. Download the bundle
-2. Configure the autoloader
-3. Enable the bundle
-4. Configure the bundle
+2. Configure the bundle
 
 ### Step 1: Download the bundle
 
-How you actually download the bundle is entirely up to you.  However, once downloaded, you should place it in the `src/Epicoftimewasted/CryptoBundle` directory.
+How you actually download the bundle is entirely up to you.  The easiest way is to grab it from [packagist.org](http://packagist.org/).
 
-### Step 2: Configure the autoloader
-
-``` php
-<?php
-// app/autoload.php
-
-$loader->registerNamespaces(array(
-        // ...
-        'Epicoftimewasted' => __DIR__ . '/../src',
-));
-```
-
-### Step 3: Enable the bundle
-
-``` php
-<?php
-// app/AppKernel.php
-
-public function registerBundles()
-{
-        $bundles = array(
-                // ...
-                new Epicoftimewasted\CryptoBundle\EpicoftimewastedCryptoBundle(),
-        );
-}
-```
-
-### Step 4: Configure the bundle
+### Step 2: Configure the bundle
 
 ``` yaml
 epicoftimewasted_crypto:
     algorithm: ~
 ```
 
-Algorithm may be any that is supported by hash_algos().
+`algorithm` is the hashing algorithm that is used by the functions that require a hash algorithm, and may be any that is supported by `hash_algos()`.
 
 License:
 --------
